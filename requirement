@@ -1,0 +1,8 @@
+Create a sample MTLS application to demonstrate and understand how MTLS works. 
+
+Create two separate applications, one act as requester and one act as responder and both service communicate with each other through MTLS. This applications should have
+option to upload and configure the certificate and trustrone. 
+
+For this test application we can use self signed certificate but I need some utility to generate the certificate because I need to prove the certificate rotation as well. 
+
+This is for learning purpose to fully understand how MTLS works and also how it will used in realtime production like scenarios by rotating the certificates. 

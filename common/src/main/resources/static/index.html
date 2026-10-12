@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sample mTLS</title>
+    <style>
+        body { font: 16px system-ui, sans-serif; max-width: 760px; margin: 3rem auto; padding: 0 1rem; color: #17212b; }
+        h1 { margin-bottom: .25rem; } .muted { color: #52616b; }
+        section { border: 1px solid #ccd5dc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+        label { display: block; margin: .8rem 0 .25rem; font-weight: 600; }
+        input { display: block; max-width: 100%; }
+        button { margin-top: 1rem; padding: .55rem .9rem; cursor: pointer; }
+        pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f2f5f7; padding: .8rem; border-radius: 5px; }
+        #message { min-height: 1.5rem; }
+    </style>
+</head>
+<body>
+<h1 id="title">Sample mTLS</h1>
+<p class="muted">The management page uses local HTTP. Only the application-to-application API uses HTTPS with mutual TLS.</p>
+<section>
+    <h2>Certificate status</h2>
+    <pre id="status">Loading…</pre>
+    <button id="generate">Generate a demo certificate bundle (.zip)</button>
+    <p class="muted">The bundle includes both identity stores, both truststores, public certificates, and a README. Default password: <code>changeit</code>.</p>
+</section>
+<section>
+    <h2>Configure PKCS#12 credentials</h2>
+    <p class="muted">Upload this app's identity store and its truststore. Uploading applies the new credentials immediately; no app restart is required.</p>
+    <form id="credentials">
+        <label for="identity">Identity store (.p12/.pfx)</label>
+        <input id="identity" name="identityStore" type="file" accept=".p12,.pfx" required>
+        <label for="identityPassword">Identity store password</label>
+        <input id="identityPassword" name="identityPassword" type="password" required>
+        <label for="trust">Truststore (.p12/.pfx)</label>
+        <input id="trust" name="trustStore" type="file" accept=".p12,.pfx" required>
+        <label for="trustPassword">Truststore password</label>
+        <input id="trustPassword" name="trustPassword" type="password" required>
+        <button type="submit">Apply credentials</button>
+    </form>
+    <p id="message" role="status"></p>
+</section>
+<section id="request-section">
+    <h2>Send a test request</h2>
+    <p>The requester calls <code>https://localhost:8443/api/hello</code> using its current identity and truststore.</p>
+    <button id="send">Send mTLS request</button>
+    <pre id="response"></pre>
+</section>
+<script>
+    const role = location.port === '8081' ? 'requester' : 'responder';
+    document.querySelector('#title').textContent = `${role[0].toUpperCase()}${role.slice(1)} mTLS console`;
+    if (role !== 'requester') document.querySelector('#request-section').hidden = true;
+
+    async function refreshStatus() {
+        const response = await fetch('/api/status');
+        document.querySelector('#status').textContent = JSON.stringify(await response.json(), null, 2);
+    }
+    document.querySelector('#generate').addEventListener('click', async () => {
+        const response = await fetch('/api/certificates/generate', { method: 'POST' });
+        if (!response.ok) {
+            document.querySelector('#message').textContent = await response.text();
+            return;
+        }
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'sample-mtls-certificates.zip';
+        link.click();
+        URL.revokeObjectURL(link.href);
+        document.querySelector('#message').textContent = 'Certificate bundle generated.';
+    });
+    document.querySelector('#credentials').addEventListener('submit', async event => {
+        event.preventDefault();
+        const response = await fetch('/api/credentials', { method: 'POST', body: new FormData(event.currentTarget) });
+        document.querySelector('#message').textContent = response.ok
+            ? 'Credentials applied successfully.'
+            : `Could not apply credentials: ${await response.text()}`;
+        await refreshStatus();
+    });
+    document.querySelector('#send').addEventListener('click', async () => {
+        const response = await fetch('/api/send', { method: 'POST' });
+        document.querySelector('#response').textContent = await response.text();
+    });
+    refreshStatus();
+</script>
+</body>
+</html>

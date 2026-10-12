@@ -1,0 +1,188 @@
+mTLS PRODUCTION RECOMMENDATIONS
+===============================
+
+Purpose
+-------
+Summarize how mutual TLS trust works and provide a production-readiness checklist.
+This sample demonstrates the concepts; it is not a production-ready deployment.
+
+1. Understand identity stores and truststores
+--------------------------------------------
+[ ] Requester identity store: requester private key, its leaf certificate, and
+    the intermediate certificates needed to present its certificate chain.
+[ ] Responder identity store: responder private key, its leaf certificate, and
+    the intermediate certificates needed to present its certificate chain.
+[ ] Requester truststore: trusted CA certificate(s) for verifying the responder.
+[ ] Responder truststore: trusted CA certificate(s) for verifying the requester.
+
+In this self-signed demo, the requester truststore contains the responder's
+certificate, and the responder truststore contains the requester's certificate.
+Trust is therefore tied directly to those individual certificates.
+
+With CA-issued certificates, each peer presents its leaf certificate and needed
+intermediates. The other peer validates a chain to a configured trust anchor,
+normally a root CA. The root generally does not need to be sent in the handshake.
+A deliberately trusted intermediate can also be a trust anchor, subject to policy.
+
+Both services can use the same CA or different CAs. Each truststore must trust
+the issuer chain of the peer it verifies. Never distribute private keys as trust
+material: a truststore needs public certificates, not the peer's private key.
+
+2. Establish a managed PKI and controlled trust boundaries
+--------------------------------------------------------
+[ ] Use a managed private PKI, enterprise CA, or appropriate managed certificate
+    service for internal service identities.
+[ ] Protect CA signing keys and restrict who may request each service identity.
+    Never distribute CA private keys to application instances.
+[ ] Use narrowly scoped trust anchors for the intended service population.
+    Avoid trusting unrelated public or enterprise CAs unnecessarily.
+[ ] Separate production and non-production trust domains.
+[ ] Define ownership for issuance, renewal, trust distribution, and incidents.
+[ ] Use approved algorithms, key sizes, and lifetimes. Automate renewal early
+    enough to recover from issuance or deployment failures before expiry.
+
+3. Validate certificates AND authorize the authenticated service
+---------------------------------------------------------------
+[ ] Require a client certificate on every protected responder endpoint.
+[ ] Validate certificate signatures, chains, validity dates, key usage, and
+    extended key usage according to policy.
+[ ] Issue responder certificates for serverAuth and requester certificates for
+    clientAuth. Give dual-role services the usages they actually require.
+[ ] Put the real service DNS name in the responder certificate's subject
+    alternative names (SANs). Keep hostname verification enabled on requesters.
+[ ] Define a stable client identity, such as a controlled URI or DNS SAN, and
+    map that identity to explicit permissions for APIs and operations.
+[ ] Reject a valid but unauthorized client even if its issuer is trusted.
+
+CA trust answers "Was this certificate issued by a trusted authority?"
+It does NOT answer "May this service invoke this endpoint?" mTLS authenticates
+the connection; application or gateway authorization remains necessary.
+Do not use a displayed subject name alone as an authorization policy.
+
+4. Protect private keys and credential configuration
+----------------------------------------------------
+[ ] Generate private keys in the intended workload or a controlled provisioning
+    system; use non-exportable keys/HSMs where required and supported.
+[ ] Store keys and passwords in a secret manager or tightly permissioned secret
+    volumes. Encrypt stored credentials and restrict access to the workload.
+[ ] Do not commit private keys, identity bundles, or passwords to source control.
+[ ] Do not log secrets or pass production passwords in command-line arguments,
+    where they can appear in process listings or shell history.
+[ ] Do not use the demo password "changeit" or distribute both services' private
+    keys together in a downloadable production bundle.
+[ ] Authenticate and authorize certificate-management actions. Protect any
+    management UI/API with HTTPS, network restrictions, CSRF protection where
+    applicable, upload limits, and auditable change controls.
+[ ] Validate replacement material before activation: usable private key,
+    matching certificate, complete chain, allowed identity/usages, validity,
+    and correct trust anchors. Loading a PKCS#12 file alone is insufficient.
+[ ] Define secure startup provisioning after restarts; do not depend on manual
+    uploads for recovery or on keys existing only in a previous process's memory.
+
+5. Rotate leaf certificates under the same trusted CA
+-----------------------------------------------------
+[ ] Issue a replacement certificate, normally with a fresh private key, before
+    the current certificate expires.
+[ ] Preserve the authorized service identity and correct hostname SANs.
+[ ] Stage and validate the new identity store, then activate it atomically.
+[ ] Confirm the replacement chain still reaches an existing trusted anchor.
+    If so, peer truststores usually need no change. A changed intermediate may
+    still require updating the presented chain or intermediate trust anchors.
+[ ] Verify NEW TLS connections use the replacement certificate and key.
+[ ] Manage pooled connections and TLS session resumption deliberately. Existing
+    connections can retain authentication from an earlier handshake; a reload
+    does not automatically reauthenticate them.
+[ ] Observe errors and all replicas before retiring the old material. Keep a
+    controlled rollback option while the old identity remains safe and valid.
+
+Requester and responder leaf certificates can rotate independently. They do not
+need to rotate as a pair when both replacement chains remain trusted.
+
+6. Rotate a CA or migrate to a new trust domain
+----------------------------------------------
+Use a trust-first, identity-second, cleanup-last sequence:
+
+1) Distribute truststores containing BOTH the old and new approved CA anchors
+   to every peer that must verify the changing identities.
+2) Verify that every affected instance has applied the expanded trust.
+3) Issue and activate identities chaining to the new CA, progressively.
+4) Test new handshakes, authorization, and all affected communication paths.
+5) After migration and the planned overlap period, remove old CA trust and
+   retire old identities. Account for offline instances and retained sessions.
+
+[ ] Track truststore versions and certificate versions across every replica.
+[ ] Make updates atomic and preserve last-known-good configuration on failure.
+[ ] Plan overlap and rollback without extending trust indefinitely.
+[ ] For a compromised CA, use an emergency removal plan rather than a normal
+    overlap that continues to trust the compromised issuer.
+
+7. Design reloads for availability
+----------------------------------
+[ ] Use a production-supported TLS reload mechanism or rolling deployments
+    with redundant instances, readiness checks, and connection draining.
+[ ] Test rotation during concurrent traffic, including long-lived connections.
+[ ] Ensure failed reloads leave the service on a safe, known configuration and
+    report the failure clearly.
+[ ] Close retired clients, connections, and executors when no longer needed.
+[ ] Bound request timeouts, concurrency, and resource consumption.
+[ ] Retry only transient failures with bounded backoff. Do not blindly retry
+    non-idempotent operations; use idempotency controls where needed.
+
+The demo requester replaces its HttpClient/SSLContext for subsequent requests.
+The demo responder stops its HTTPS listener and starts another on the same port.
+The application process stays up, but listener replacement can interrupt traffic
+and is NOT zero-downtime certificate rotation.
+
+8. Secure the deployment topology
+--------------------------------
+[ ] Prefer TLS 1.3; allow TLS 1.2 only where needed with approved cipher suites.
+    Disable obsolete protocols and never use trust-all or hostname bypasses.
+[ ] Define where TLS terminates: application, ingress, gateway, or service mesh.
+[ ] If a proxy terminates client mTLS, secure and authenticate the backend hop
+    according to the end-to-end trust requirements.
+[ ] Never accept caller-supplied client-identity headers as proof of mTLS.
+    Any forwarded identity must come only from an authenticated, trusted proxy
+    that strips spoofed input and enforces the intended authorization policy.
+[ ] Restrict network access and prevent routes that bypass the mTLS enforcement
+    point. Keep management endpoints separate from application traffic.
+[ ] Externalize service URLs, ports, secret locations, and TLS policy instead
+    of relying on this demo's fixed localhost addresses.
+[ ] Keep JDK, framework, TLS provider, and other dependencies supported and
+    patched. Maintain accurate system clocks for certificate validity checks.
+
+9. Prepare revocation and compromise response
+--------------------------------------------
+[ ] Decide whether and how CRL/OCSP checks are required. Configure and test the
+    actual JVM/provider behavior; default trust-manager initialization does
+    not establish a tested revocation policy.
+[ ] Define handling of unreachable revocation services, cached responses, and
+    the availability/security trade-off. Do not silently bypass required checks.
+[ ] Consider short-lived certificates with automated renewal; short lifetimes
+    reduce exposure but are not an instant-revocation mechanism.
+[ ] Prepare a runbook to replace compromised keys, revoke or deny identities,
+    remove compromised CA trust, and terminate affected connections/sessions.
+[ ] Do not roll back to a known compromised identity or trust anchor.
+
+10. Monitor, audit, and prove the behavior
+-----------------------------------------
+[ ] Maintain an inventory of owners, issuers, SANs, serial numbers, fingerprints,
+    expiry dates, and deployed credential/trust versions.
+[ ] Alert on approaching expiry, failed renewals/reloads, handshake failures,
+    authorization denials, and inconsistent rollout state.
+[ ] Audit credential changes without logging keys or passwords. Limit exposure
+    of detailed TLS errors to operators rather than remote callers.
+[ ] Test success with approved identities and failure with missing certificates,
+    untrusted issuers, wrong hostnames, expired/not-yet-valid certificates,
+    inappropriate usages, incomplete chains, and unauthorized valid clients.
+[ ] Test invalid uploads preserve the previous working configuration.
+[ ] Test independent leaf rotation, CA overlap, old-trust removal, process
+    restarts, pooled/session behavior, and rollback under realistic load.
+[ ] For a no-client-certificate test, verify a healthy reachable listener and
+    a successful authorized control request. A connection failure alone does
+    not prove client authentication was enforced.
+
+Production go-live rule
+----------------------
+Do not promote this learning demo unchanged. Confirm managed issuance, protected
+keys, narrow trust, explicit authorization, automated renewal, safe deployment
+and reloads, monitoring, and tested incident/recovery procedures first.
