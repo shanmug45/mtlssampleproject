@@ -1,1 +1,237 @@
 
+Here are the meeting minutes from the UI workgroup discussion, with likely voice-to-text errors corrected and the terminology standardized where the context makes the intended meaning clear. I’ve separated confirmed decisions from items requiring further clarification.
+
+# Minutes of Meeting (MoM): UI Workgroup – Mutual TLS (mTLS)
+
+**Meeting:** UI Workgroup – mTLS Configuration and Job-Step UI\
+**Date:** Not specified in the transcript\
+**Duration:** Approximately 23 minutes of recorded discussion, with timestamps extending to around 23:18\
+**Attendees:** UI workgroup members, technical representatives, and the UI designer\
+**Purpose:** Review the proposed UI mock-ups for mTLS configuration, identity and trust stores, file uploads, validation, and integration with job steps and data sources.
+
+## 1. Terminology and Naming
+
+The team discussed the use of the term *certificate* throughout the UI. It was agreed that this term could be misleading because the identity key store contains both the private key and the public certificate associated with the local identity.
+
+The discussion distinguished between:
+
+- **Identity key store:** Contains the local platform or tenant identity used when establishing an mTLS connection.
+- **Trust store:** Contains the public certificates used to establish trust in remote server identities.
+
+The team agreed that the terminology should clearly distinguish the local identity from the remote server's identity.
+
+**Decisions and proposals:**
+
+- Prefer *Identity Key Store* or *Identity* over the generic term *Certificate* where appropriate.
+- Use a dedicated **mTLS** section to group related configuration.
+- Group identity key stores and trust stores under the mTLS section on the tenant page.
+- Use consistent terminology across the tenant configuration, job-step editor, and data-source configuration.
+- Final names, including the terminology for the platform/operator identity, will be clarified with Product Management.
+
+## 2. Platform-Level Identity Configuration
+
+The platform-level configuration currently supports a single default identity key store.
+
+The team reviewed the proposed UI for configuring this identity and agreed that the existing *Operator Certificate* label should be reconsidered.
+
+**Discussion points:**
+
+- The identity key store represents the platform's identity when connecting to remote systems.
+- The UI should distinguish this identity from the trust store containing remote server certificates.
+- The platform-level identity should be clearly identified as the default identity available for tenant use.
+
+**Outcome:**
+
+- Retain the single default identity configuration.
+- Revisit the label *Operator Certificate* and consider alternatives such as *Default Identity* or *mTLS Operator Identity*.
+- Confirm the final terminology with Product Management.
+
+## 3. Tenant-Level Identity and Trust Store Configuration
+
+The team reviewed the proposed tenant UI and agreed that tenant identities and trust configuration should be managed separately.
+
+### 3.1 Tenant identity key stores
+
+- A tenant may configure zero or more identity key stores.
+- Each identity key store represents an identity that can be selected for an mTLS-enabled job step.
+- Multiple identities may be registered for a tenant.
+- The UI should display the relevant identity information and validation status.
+
+### 3.2 Tenant trust store
+
+The team discussed how to manage remote server certificates and agreed on a shared trust store per tenant as the preferred approach.
+
+**Rationale:**
+
+- Remote server certificates are public certificates and do not carry the same sensitivity as private identity keys.
+- A single tenant trust store simplifies administration and allows multiple mTLS connections to share trusted certificates.
+- Requiring a separate trust store for each identity key store would create unnecessary duplication and management overhead.
+- Keeping identity key stores and trust stores separate avoids mixing private identity keys with certificates used to trust remote servers.
+
+**Decisions:**
+
+- Provide a separate trust store configuration for each tenant.
+- Allow the trust store to contain multiple trusted certificates.
+- Display certificate details, including expiry information, for the certificates contained in the trust store.
+- Do not require users to upload a separate trust store for every identity key store.
+
+### 3.3 Optional trust store
+
+The trust store is expected to be optional initially. If no tenant-specific trust store is configured, the connection may use the existing Java trust configuration, such as the `jssecacerts` file.
+
+The technical team must confirm the precise runtime behaviour and how trust stores will be loaded when an mTLS connection is established.
+
+## 4. File Upload and Password Validation
+
+The team reviewed the proposed file-upload workflow and identified opportunities to make it more consistent with the application's existing UI conventions.
+
+### 4.1 Upload interaction
+
+The preferred workflow is:
+
+1. The user clicks the upload or file-selection control.
+2. The browser opens the file chooser directly.
+3. The user selects the identity key store or trust store file.
+4. The user enters the password where required.
+5. The system validates the file and displays any relevant errors.
+6. The file is persisted to the appropriate storage location after successful validation and configuration saving.
+
+The designer will review the proposed interaction to avoid an unnecessary intermediate upload dialog.
+
+### 4.2 Password validation
+
+- Password validation must occur on the server side because the browser cannot independently verify whether the password can open the key store.
+- The selected file must be made available to the Gateway for validation.
+- Invalid passwords should produce a clear validation message and allow the user to correct the password without unnecessarily selecting the file again.
+- The implementation should avoid permanently storing files that have failed validation.
+
+The precise temporary-file handling and cleanup behaviour remains an implementation consideration.
+
+### 4.3 Upload validation
+
+The following validation scenarios were discussed:
+
+- Incorrect or missing password.
+- Invalid or expired certificate information.
+- Certificates approaching expiry.
+- An identity key store containing more than one certificate, where this is not supported by the intended configuration.
+- Missing required fields or incomplete configuration.
+
+Validation should take place during the upload/configuration workflow, with clear feedback to the user.
+
+## 5. File Storage and Cleanup
+
+The team discussed how uploaded files should be managed when users replace a previously configured identity key store or cancel the upload workflow.
+
+**Agreed approach:**
+
+- Validate the uploaded file before treating it as a valid configured identity.
+- Avoid leaving unused files in SRA storage.
+- When the tenant configuration is saved, run a Gateway maintenance or cleanup task.
+- The cleanup task should identify identity key store files referenced by the saved tenant configuration and remove obsolete files from the relevant mTLS storage location.
+
+For example, if a tenant replaces `steve.jks` with `keys.jks`, the old file should be removed once it is no longer referenced by any relevant configuration.
+
+The exact temporary-storage and cleanup implementation must be confirmed by the technical team.
+
+## 6. UI Validation Messages and Certificate Status
+
+The team reviewed how errors, warnings, and certificate information should appear in the UI.
+
+**UI guidance:**
+
+- Follow existing application conventions for labels, text boxes, upload controls, and tooltips.
+- Display validation messages consistently within the relevant section or tab.
+- Highlight the affected field where appropriate, while displaying the explanatory message in the agreed section-level location.
+- Use colour coding to distinguish certificates approaching expiry from certificates that have expired.
+- Keep certificate summary information visible and easy to understand.
+
+The team supported the proposed colour-coded status indicators. The final placement and presentation of warnings may be refined after the UI is available for review in the application.
+
+For tenant trust stores containing multiple certificates, the UI should show the relevant information for each certificate, including its expiry date and other useful certificate details.
+
+## 7. Job-Step Editor Integration
+
+The team reviewed the proposed mTLS-related job-step UI, including the icon, descriptive text, identity selection, and certificate details.
+
+### 7.1 mTLS job-step identification
+
+- The proposed handshake icon was well received.
+- The job-step UI should make it clear that the connection is secured using mutual TLS.
+- The flip-card or descriptive panel should include an appropriate explanation of the mTLS security behaviour.
+
+### 7.2 Identity selection
+
+The job-step designer should select an identity by its configured name rather than having to understand the underlying key-store implementation.
+
+**Decisions:**
+
+- Use **Identity** as the preferred label in the job-step selection field, subject to final terminology approval.
+- If a default platform identity is configured, preselect it when creating a new mTLS job step.
+- Keep the terminology consistent with the tenant configuration UI.
+- Clearly distinguish the default platform identity from tenant-specific identities.
+
+### 7.3 Identity details
+
+When an identity is selected, the UI should show useful details, including:
+
+- Description.
+- Expiry date.
+- Other relevant identity or certificate information.
+
+The underlying file name was considered unnecessary in the job-step details and does not need to be displayed by default.
+
+The team also discussed highlighting the default platform identity in the selection list. A fixed, recognisable default label was suggested as an alternative to an additional operator badge. The final presentation requires confirmation.
+
+## 8. REST Proxy and Data-Source Configuration
+
+The team briefly reviewed the proposed mTLS-related fields in the REST proxy job-step parameters and the corresponding data-source configuration.
+
+- The designer will align the UI terminology and presentation with the decisions made for the main tenant and job-step screens.
+- The team will verify whether the relevant REST proxy job step supports the required mTLS functionality and whether any additional flexibility is needed.
+- The data-source UI should follow the same terminology and interaction patterns.
+- No additional functional changes were confirmed during this discussion beyond the mTLS-related integration and consistency updates.
+
+## 9. Decisions Summary
+
+1. Separate local identity key stores from remote-server trust stores.
+2. Prefer identity-oriented terminology over the generic term *Certificate*.
+3. Organise related configuration under a dedicated mTLS section.
+4. Support multiple tenant identity key stores.
+5. Use one shared trust store per tenant, containing multiple trusted certificates.
+6. Keep the tenant trust store optional, subject to confirmation of runtime fallback behaviour.
+7. Simplify file selection by opening the file chooser directly.
+8. Perform password and key-store validation on the server side.
+9. Clean up obsolete uploaded files when the tenant configuration is saved.
+10. Use colour-coded status indicators for certificates approaching expiry or already expired.
+11. Use **Identity** in the job-step selector and preselect the default platform identity when available.
+12. Align terminology and UI patterns across tenant configuration, job steps, and data sources.
+
+## 10. Action Items
+
+| #  | Action                                                                                                                                                   | Owner                          |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| 1  | Review and update naming across the mock-ups, replacing ambiguous uses of *Certificate* with appropriate identity key store and trust store terminology. | UI designer                    |
+| 2  | Confirm the final product terminology for the default platform identity, tenant identities, and tenant trust store with Product Management.              | Product/technical team         |
+| 3  | Update the tenant UI to group identity key stores and the trust store under a dedicated mTLS section.                                                    | UI designer                    |
+| 4  | Refine the upload workflow to use direct file selection and a separate password-entry step where required.                                               | UI designer / development team |
+| 5  | Define server-side validation for passwords, key-store contents, certificate expiry, and unsupported certificate configurations.                         | Development team               |
+| 6  | Design the Gateway file lifecycle and cleanup task to remove obsolete or unreferenced files from SRA storage.                                            | Gateway/development team       |
+| 7  | Confirm runtime trust-store loading and fallback behaviour when a tenant-specific trust store is not configured.                                         | Technical team                 |
+| 8  | Update the job-step editor to use the agreed identity terminology, preselect the default identity, and display relevant identity details.                | UI designer                    |
+| 9  | Check whether the REST proxy job step supports the intended mTLS functionality and update the UI accordingly.                                            | Technical team                 |
+| 10 | Align the data-source configuration UI with the agreed terminology and interaction patterns.                                                             | UI designer                    |
+| 11 | Review validation-message placement and certificate-status indicators once the updated UI is available.                                                  | UI workgroup                   |
+
+## 11. Open Questions and Follow-Up
+
+- What is the final approved terminology for the default platform identity and tenant identities?
+- Should the default platform identity use a fixed label, and how should it be visually distinguished in the job-step selector?
+- What exact runtime fallback mechanism will apply when no tenant trust store is configured?
+- How will temporary uploads, cancelled uploads, failed validation, and obsolete files be handled across the Gateway and SRA?
+- Does the REST proxy job step support the required mTLS behaviour, or are additional changes needed?
+- What is the final presentation and location of certificate-expiry warnings and validation messages?
+
+**Conclusion:** The workgroup was broadly positive about the proposed UI direction. The main follow-up is to standardise terminology, refine the upload and validation flow, confirm runtime trust-store behaviour, and align the job-step and data-source screens with the tenant configuration model.
+
+Separate decisions from unresolved proposalsClarify the upload persistence decision
